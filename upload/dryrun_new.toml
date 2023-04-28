@@ -1,0 +1,30 @@
+[[updates]]
+version = "2.0.0"
+timestamp = 1682666891.921815
+
+[updates.mods]
+add = [ "mods/test.jar", "mods/bar.jar", "mods/recursion/recursion/blargh.jar",]
+rem = []
+[updates.cfgs]
+add = []
+rem = [ "config/recursion/depth_test.cfg", "config/foo.cfg",]
+[[updates]]
+version = "1.0.1"
+timestamp = 1674730800.0
+
+[updates.mods]
+add = []
+rem = []
+[updates.cfgs]
+add = [ "config/recursion/depth_test.cfg",]
+rem = []
+[[updates]]
+version = "1.0.0"
+timestamp = 1674730800.0
+
+[updates.mods]
+add = [ "mods/foo.jar",]
+rem = [ "mods/bar.jar",]
+[updates.cfgs]
+add = [ "config/foo.cfg",]
+rem = [ "config/bar.cfg",]
