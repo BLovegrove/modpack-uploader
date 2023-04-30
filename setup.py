@@ -7,7 +7,7 @@ import config as cfg
 build_options = {
     "packages": [],
     "excludes": [],
-    "build_exe": "build",
+    # "build_exe": "",
 }
 # build_options = {"packages": [], "excludes": [], }
 
@@ -17,6 +17,6 @@ setup(
     description=f"Uploads new version of your chosen modpack",
     options={"build_exe": build_options},
     executables=[
-        Executable("./update/__main__.py", base="Console", target_name="modpack-upload")
+        Executable("upload/__main__.py", base="Console", target_name="modpack-upload")
     ],
 )

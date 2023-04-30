@@ -60,7 +60,7 @@ class Update:
 
 
 class Changelog:
-    def __init__(self, updates: Update = None):
+    def __init__(self, updates: list[Update] = None):
         self.updates: list[Update] = updates if updates else []
 
     def from_dict(self, config: dict[str, any]):
@@ -159,7 +159,6 @@ def sftp_mkdirs(sftp: SFTPClient, remote: str):
         try:
             sftp.stat(dir)
         except:
-            print(f"making {dir} dir"),
             sftp.mkdir(dir)
 
 
@@ -175,7 +174,7 @@ def main():
         dry_run = False
 
     # set current working dir to script dir ---------------------------------------------------------- #
-    os.chdir(os.path.dirname(__file__))
+    os.chdir(os.path.dirname(sys.argv[0]))
 
     # check connection to server --------------------------------------------------------------------- #
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -211,10 +210,15 @@ def main():
     sftp = ssh.open_sftp()
     sftp.chdir(cfg.server.filepath)
 
-    # load changelog file ---------------------------------------------------------------------------- #
-    with sftp.open("changelog.toml", "r") as f:
-        dict_changelog = toml.loads("".join(f.readlines()))
-        changelog = Changelog().from_dict(dict_changelog)
+    # load changelog file or create new if one doesnt exist ------------------------------------------ #
+    try:
+        with sftp.open("changelog.toml", "r") as f:
+            dict_changelog = toml.loads("".join(f.readlines()))
+            changelog = Changelog().from_dict(dict_changelog)
+
+    except FileNotFoundError:
+        changelog = Changelog()
+        changelog.add_update(Version(0, 0, 0), [])
 
     # get semantic version number -------------------------------------------------------------------- #
     version_current = changelog.updates[0].version
@@ -224,24 +228,26 @@ def main():
 
     # ask for new semantic version ------------------------------------------------------------------- #
     while True:
-        config_all = input(
+        version_target = input(
             os.linesep
+            + f"Current version: {version_current}"
+            + os.linesep
             + "Please enter a semantic version type to increase by 1 for this upload. (M)ajor, (m)inor (p)atch or a custom number with (c)ustom."
             + os.linesep
             + "> "
         )
 
-        if config_all in ["M", "m", "p", "c"]:
+        if version_target in ["M", "m", "p", "c"]:
             break
-        elif config_all.lower() in ["major", "minor", "patch", "custom"]:
-            config_all = config_all.lower()
+        elif version_target.lower() in ["major", "minor", "patch", "custom"]:
+            version_target = version_target.lower()
             break
         else:
             print(
                 f"{os.linesep}Please enter a valid option (full words or short-codes minus backets. Short-codes are case-sensitive).{os.linesep}"
             )
 
-    match config_all:
+    match version_target:
         case "M" | "major":
             version_update = version_current.bump_major()
 
@@ -260,8 +266,8 @@ def main():
                 )
 
                 try:
-                    v = Version.parse(version_custom)
-                    version_update = version_custom
+                    parsed_version = Version.parse(version_custom)
+                    version_update = parsed_version
                     break
                 except ValueError as e:
                     print(
@@ -270,33 +276,55 @@ def main():
                     )
 
     # find out if user wants *all* configs, or only ones changed since last update ------------------- #
-    while True:
-        config_all = input(
-            os.linesep
-            + "Would you like to upload *all* config files? Please enter (Y)es for all, or (N)o for updated only."
-            + os.linesep
-            + "> "
-        )
-
-        if config_all.lower() in ["y", "n"]:
-            config_all = config_all.lower()
-            break
-        elif config_all.lower() in ["yes", "no"]:
-            config_all = config_all.lower()
-            break
-        else:
-            print(
+    if version_current == Version(0, 0, 0):
+        config_all = True
+    else:
+        while True:
+            config_all = input(
                 os.linesep
-                + f"Please enter a valid option (full words or short-codes minus backets)."
+                + "Would you like to upload *all* config files? Please enter (Y)es for all, or (N)o for updated only."
                 + os.linesep
+                + "> "
             )
 
+            if config_all.lower() in ["y", "n"]:
+                config_all = config_all.lower()
+                break
+            elif config_all.lower() in ["yes", "no"]:
+                config_all = config_all.lower()
+                break
+            else:
+                print(
+                    os.linesep
+                    + f"Please enter a valid option (full words or short-codes minus backets)."
+                    + os.linesep
+                )
+
     # collate list of mods --------------------------------------------------------------------------- #
+    try:
+        sftp.mkdir("mods")
+    except Exception:
+        pass
+
+    print("Finding remote mods...")
     mods_remote = sftp_list_recursive(sftp, "mods")
+    print(f"Found {len(mods_remote)} mods." + os.linesep)
+
+    print("Finding local mods...")
     mods_local = local_list_recursive("../mods")
+    print(f"Found {len(mods_local)} mods.")
+
+    print(os.linesep)
 
     # collate list of configs (all, or only updates, depending on config_all) ------------------------ #
+    try:
+        sftp.mkdir("config")
+    except Exception:
+        pass
+
+    print("Finding local config files...")
     configs_local = local_list_recursive("../config")
+    print(f"Found {len(configs_local)} configs.")
 
     if not config_all:
         for config in configs_local:
@@ -308,35 +336,53 @@ def main():
             if latest == t2:
                 configs_local.remove(config)
 
+    print(os.linesep)
+
     # compile into upload queue ---------------------------------------------------------------------- #
     upload_queue = []
 
+    print("Collating list of files to upload...")
     for mod in mods_local:
+        print(
+            f"#{mods_local.index(mod) + 1} of {len(mods_local + configs_local)} - '{mod}' "
+        )
         if mod not in mods_remote:
             upload_queue.append(mod)
 
     for config in configs_local:
+        print(
+            f"#{len(mods_local) + configs_local.index(config) + 1} of {len(mods_local + configs_local)} - '{config}'"
+        )
         upload_queue.append(config)
 
     files_local = mods_local + configs_local
 
+    print(os.linesep)
+
     # upload files from queue ------------------------------------------------------------------------ #
-    if dry_run:
-        for file in upload_queue:
-            print(f"Uploading {'../' + file} to {file}")
-    else:
-        for file in upload_queue:
+    print("Uploading files to server...")
+    for file in upload_queue:
+        print(
+            f"#{upload_queue.index(file) + 1} of {len(upload_queue)} - '{'../' + file}'"
+        )
+        if not dry_run:
             try:
                 sftp.put("../" + file, file)
             except FileNotFoundError:
                 sftp_mkdirs(sftp, file)
                 sftp.put("../" + file, file)
 
+    print(os.linesep)
+
     # add new update to changelog -------------------------------------------------------------------- #
+    print("Adding update to changelog...")
     changelog_old = copy.deepcopy(changelog)
     changelog.add_update(version_update, files_local)
 
+    print(os.linesep)
+
     # dump changelog and override remote ------------------------------------------------------------- #
+    print("Dumping new changelog and uploading to server...")
     if dry_run:
         with open("dryrun_old.toml", "w") as f:
             f.write(toml.dumps(changelog_old.to_dict()))
