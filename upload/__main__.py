@@ -275,6 +275,8 @@ def main():
                         + os.linesep
                     )
 
+    print(os.linesep)
+
     # find out if user wants *all* configs, or only ones changed since last update ------------------- #
     if version_current == Version(0, 0, 0):
         config_all = True
