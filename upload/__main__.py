@@ -290,11 +290,11 @@ def main():
                 + "> "
             )
 
-            if config_all.lower() in ["y", "n"]:
-                config_all = config_all.lower()
-                break
-            elif config_all.lower() in ["yes", "no"]:
-                config_all = config_all.lower()
+            if config_all.lower() in ["y", "n", "yes", "no"]:
+                if config_all.lower() == "y" or config_all.lower() == "yes":
+                    config_all = True
+                else:
+                    config_all = False
                 break
             else:
                 print(
