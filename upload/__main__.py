@@ -25,7 +25,7 @@ class ChangeType(Enum):
     CFG = 2
 
 
-class Changes:
+class Change:
     def __init__(self, add: list[str] = None, rem: list[str] = None):
         self.add = add if add else []
         self.rem = rem if rem else []
@@ -47,8 +47,8 @@ class Update:
         self,
         version: Version,
         timestamp: float,
-        mods: Changes,
-        cfgs: Changes,
+        mods: Change,
+        cfgs: Change,
     ):
         self.version = version
         self.timestamp = timestamp
@@ -78,8 +78,8 @@ class Changelog:
                 Update(
                     Version.parse(update["version"]),
                     update["timestamp"],
-                    Changes(update["mods"]["add"], update["mods"]["rem"]),
-                    Changes(update["cfgs"]["add"], update["cfgs"]["rem"]),
+                    Change(update["mods"]["add"], update["mods"]["rem"]),
+                    Change(update["cfgs"]["add"], update["cfgs"]["rem"]),
                 )
             )
 
@@ -111,8 +111,8 @@ class Changelog:
         update = Update(
             version=version,
             timestamp=datetime.timestamp(datetime.now()),
-            mods=Changes().from_comparison(active_mods, new_mods),
-            cfgs=Changes().from_comparison(active_cfgs, new_cfgs),
+            mods=Change().from_comparison(active_mods, new_mods),
+            cfgs=Change().from_comparison(active_cfgs, new_cfgs),
         )
 
         self.updates.insert(0, update)
