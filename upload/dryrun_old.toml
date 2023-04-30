@@ -2,19 +2,13 @@
 version = "1.0.1"
 timestamp = 1674730800.0
 
-[updates.mods]
-add = []
-rem = []
-[updates.cfgs]
+[updates.changes]
 add = [ "config/recursion/depth_test.cfg",]
 rem = []
 [[updates]]
 version = "1.0.0"
 timestamp = 1674730800.0
 
-[updates.mods]
-add = [ "mods/foo.jar",]
-rem = [ "mods/bar.jar",]
-[updates.cfgs]
-add = [ "config/foo.cfg",]
-rem = [ "config/bar.cfg",]
+[updates.changes]
+add = [ "mods/foo.jar", "config/foo.cfg",]
+rem = [ "mods/bar.jar", "config/bar.cfg",]

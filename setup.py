@@ -1,4 +1,5 @@
 from cx_Freeze import setup, Executable
+import config as cfg
 
 # Dependencies are automatically detected, but it might need
 # fine tuning.
@@ -12,7 +13,7 @@ build_options = {
 
 setup(
     name="modpack-uploader",
-    version="1.0",
+    version=f"{cfg.exe.version}",
     description=f"Uploads new version of your chosen modpack",
     options={"build_exe": build_options},
     executables=[

@@ -14,9 +14,6 @@ import config as cfg
 from stat import S_ISDIR, S_ISREG
 
 
-# TODO: rewrite all of this to abstract changes away from mods/config and just read the start of the change entry to determine what goes where
-
-
 # ================================================================================================ #
 # changelog schema                                                                                 #
 # ================================================================================================ #
@@ -25,7 +22,7 @@ class ChangeType(Enum):
     CFG = 2
 
 
-class Change:
+class Changes:
     def __init__(self, add: list[str] = None, rem: list[str] = None):
         self.add = add if add else []
         self.rem = rem if rem else []
@@ -47,22 +44,18 @@ class Update:
         self,
         version: Version,
         timestamp: float,
-        mods: Change,
-        cfgs: Change,
+        changes: Changes,
     ):
         self.version = version
         self.timestamp = timestamp
-        self.mods = mods
-        self.cfgs = cfgs
+        self.changes = changes
 
     def to_dict(self):
-        mods = {"add": self.mods.add, "rem": self.mods.rem}
-        cfgs = {"add": self.cfgs.add, "rem": self.cfgs.rem}
+        changes = {"add": self.changes.add, "rem": self.changes.rem}
         return {
             "version": f"{self.version.major}.{self.version.minor}.{self.version.patch}",
             "timestamp": self.timestamp,
-            "mods": mods,
-            "cfgs": cfgs,
+            "changes": changes,
         }
 
 
@@ -78,25 +71,20 @@ class Changelog:
                 Update(
                     Version.parse(update["version"]),
                     update["timestamp"],
-                    Change(update["mods"]["add"], update["mods"]["rem"]),
-                    Change(update["cfgs"]["add"], update["cfgs"]["rem"]),
+                    Changes(update["changes"]["add"], update["changes"]["rem"]),
                 )
             )
 
         self.updates = updates
         return self
 
-    def compile_changes(self, target: ChangeType):
+    def compile_changes(self):
         result: list[str] = []
 
         for update in self.updates:
-            for item in (
-                update.mods.add if target == ChangeType.MOD else update.cfgs.add
-            ):
+            for item in update.changes.add:
                 result.append(item)
-            for item in (
-                update.mods.rem if target == ChangeType.MOD else update.cfgs.rem
-            ):
+            for item in update.changes.rem:
                 try:
                     result.remove(item)
                 except ValueError:
@@ -104,15 +92,13 @@ class Changelog:
 
         return result
 
-    def add_update(self, version: str, new_mods: list[str], new_cfgs: list[str]):
-        active_mods = self.compile_changes(ChangeType.MOD)
-        active_cfgs = self.compile_changes(ChangeType.CFG)
+    def add_update(self, version: Version, new_files: list[str]):
+        active_files = self.compile_changes()
 
         update = Update(
             version=version,
             timestamp=datetime.timestamp(datetime.now()),
-            mods=Change().from_comparison(active_mods, new_mods),
-            cfgs=Change().from_comparison(active_cfgs, new_cfgs),
+            changes=Changes().from_comparison(active_files, new_files),
         )
 
         self.updates.insert(0, update)
@@ -130,16 +116,19 @@ class Changelog:
 # ================================================================================================ #
 # helper methods                                                                                   #
 # ================================================================================================ #
-def sftp_list_recursive(sftp: SFTPClient, remote_dir: str):
+def sftp_list_recursive(sftp: SFTPClient, remote_dir: str, file_list: list[str] = None):
     files: list[str] = []
 
     for dir in sftp.listdir_attr(remote_dir):
         path = remote_dir + "/" + dir.filename
         mode = dir.st_mode
         if S_ISDIR(mode):
-            sftp_list_recursive(sftp, path)
+            sftp_list_recursive(sftp, path, files)
         elif S_ISREG(mode):
-            files.append(path)
+            if file_list:
+                file_list.append(path)
+            else:
+                files.append(path)
 
     return files
 
@@ -311,7 +300,7 @@ def main():
 
     if not config_all:
         for config in configs_local:
-            modified = os.path.getmtime("../config/" + config)
+            modified = os.path.getmtime("../" + config)
             t1 = datetime.fromtimestamp(modified)
             t2 = datetime.fromtimestamp(timestamp_current)
             latest = max((t1, t2))
@@ -320,7 +309,6 @@ def main():
                 configs_local.remove(config)
 
     # compile into upload queue ---------------------------------------------------------------------- #
-
     upload_queue = []
 
     for mod in mods_local:
@@ -330,7 +318,7 @@ def main():
     for config in configs_local:
         upload_queue.append(config)
 
-    print(f"Upload queue:{upload_queue}")
+    files_local = mods_local + configs_local
 
     # upload files from queue ------------------------------------------------------------------------ #
     if dry_run:
@@ -346,7 +334,7 @@ def main():
 
     # add new update to changelog -------------------------------------------------------------------- #
     changelog_old = copy.deepcopy(changelog)
-    changelog.add_update(version_update, mods_local, configs_local)
+    changelog.add_update(version_update, files_local)
 
     # dump changelog and override remote ------------------------------------------------------------- #
     if dry_run:

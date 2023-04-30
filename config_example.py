@@ -9,3 +9,8 @@ class server:
     # Path to the folder you want your modpack version folders to live. This is usually the same as the path in your URL setting above.
     # I would recommend using nginx to host it on /var/www/<something> or similar. This program does not work with dropbox etc. Only something accessable via SFTP.
     filepath = "My Modpack/"
+
+
+class exe:
+    # Version number to include in compiled executable - use to differentiate versions where user might already have an old one
+    version = "1.0"
