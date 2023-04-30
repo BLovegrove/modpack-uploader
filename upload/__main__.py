@@ -30,16 +30,19 @@ class Changes:
         self.add = add if add else []
         self.rem = rem if rem else []
 
-    def from_comparison(self, active_state: list[str], target_state: list[str]):
-        for item in target_state:
-            if item not in active_state:
-                self.add.append(item)
+        # def from_comparison(self, remote_state: list[str], local_state: list[str]):
+        #     for item in local_state:
+        #         if item not in remote_state:
+        #             self.add.append(item)
 
-        for item in active_state:
-            if item not in target_state:
-                self.rem.append(item)
+        #     for item in remote_state:
+        #         if item not in local_state:
+        #             self.rem.append(item)
 
-        return self
+        # print(f"Remote: {remote_state}")
+        # print(f"Local: {local_state}")
+
+        # return self
 
 
 class Update:
@@ -95,13 +98,18 @@ class Changelog:
 
         return result
 
-    def add_update(self, version: Version, new_files: list[str]):
-        active_files = self.compile_changes()
+    def add_update(
+        self, version: Version, local_files: list[str], changed_files: list[str]
+    ):
+        remote_files = self.compile_changes()
+
+        files_removed = [file for file in remote_files if file not in local_files]
+        files_added = changed_files
 
         update = Update(
             version=version,
             timestamp=datetime.timestamp(datetime.now()),
-            changes=Changes().from_comparison(active_files, new_files),
+            changes=Changes(files_added, files_removed),
         )
 
         self.updates.insert(0, update)
@@ -221,7 +229,7 @@ def main():
 
     except FileNotFoundError:
         changelog = Changelog()
-        changelog.add_update(Version(0, 0, 0), [])
+        changelog.add_update(Version(0, 0, 0), [], [])
 
     # get semantic version number -------------------------------------------------------------------- #
     version_current = changelog.updates[0].version
@@ -322,6 +330,7 @@ def main():
     print("Finding local mods...")
     mods_local = local_list_recursive("../mods")
     mods_local = [mod for mod in mods_local if "mods/.index" not in mod]
+    mods_changed = [mod for mod in mods_local if mod not in mods_remote]
     print(f"Found {len(mods_local)} mods.")
 
     print(os.linesep)
@@ -335,10 +344,9 @@ def main():
 
     print("Finding local config files...")
     configs_local = local_list_recursive("../config")
-    print(f"Found {len(configs_local)} configs.")
 
     if not config_all:
-        configs_new = []
+        configs_changed = []
 
         for config in configs_local:
             modified = os.path.getmtime("../" + config)
@@ -346,9 +354,11 @@ def main():
             t2 = datetime.fromtimestamp(last_timestamp)
 
             if t1 > t2:
-                configs_new.append(config)
+                configs_changed.append(config)
+    else:
+        configs_changed = configs_local
 
-        configs_local = configs_new
+    print(f"Found {len(configs_changed)} configs that need uploading.")
 
     print(os.linesep)
 
@@ -357,18 +367,18 @@ def main():
 
     print("Collating list of files to upload...")
     for mod in tqdm(
-        mods_local,
+        mods_changed,
         "Mods",
         leave=True,
         position=0,
     ):
-        if mod not in mods_remote:
-            upload_queue.append(mod)
+        upload_queue.append(mod)
 
-    for config in tqdm(configs_local, "Configs", leave=True, position=0):
+    for config in tqdm(configs_changed, "Configs", leave=True, position=0):
         upload_queue.append(config)
 
     files_local = mods_local + configs_local
+    files_changed = mods_changed + configs_changed
     print(f"{len(upload_queue)} files need uploading.")
 
     print(os.linesep)
@@ -388,7 +398,7 @@ def main():
     # add new update to changelog -------------------------------------------------------------------- #
     print("Adding update to changelog...")
     changelog_old = copy.deepcopy(changelog)
-    changelog.add_update(version_update, files_local)
+    changelog.add_update(version_update, files_local, files_changed)
 
     print(os.linesep)
 
