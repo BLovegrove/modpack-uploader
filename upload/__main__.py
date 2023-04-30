@@ -321,6 +321,7 @@ def main():
 
     print("Finding local mods...")
     mods_local = local_list_recursive("../mods")
+    mods_local = [mod for mod in mods_local if "mods/.index" not in mod]
     print(f"Found {len(mods_local)} mods.")
 
     print(os.linesep)
@@ -334,17 +335,20 @@ def main():
 
     print("Finding local config files...")
     configs_local = local_list_recursive("../config")
-    configs_final = []
     print(f"Found {len(configs_local)} configs.")
 
-    if config_all is False:
+    if not config_all:
+        configs_new = []
+
         for config in configs_local:
             modified = os.path.getmtime("../" + config)
             t1 = datetime.fromtimestamp(modified)
             t2 = datetime.fromtimestamp(last_timestamp)
 
-            if t1 <= t2:
-                configs_local.remove(config)
+            if t1 > t2:
+                configs_new.append(config)
+
+        configs_local = configs_new
 
     print(os.linesep)
 
@@ -361,10 +365,10 @@ def main():
         if mod not in mods_remote:
             upload_queue.append(mod)
 
-    for config in tqdm(configs_final, "Configs", leave=True, position=0):
+    for config in tqdm(configs_local, "Configs", leave=True, position=0):
         upload_queue.append(config)
 
-    files_local = mods_local + configs_final
+    files_local = mods_local + configs_local
     print(f"{len(upload_queue)} files need uploading.")
 
     print(os.linesep)
