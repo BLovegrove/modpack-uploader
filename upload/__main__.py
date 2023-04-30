@@ -1,5 +1,7 @@
 import copy
 from datetime import datetime
+import hashlib
+import pathlib
 import socket
 import paramiko
 from paramiko import SFTPClient
@@ -138,7 +140,7 @@ def local_list_recursive(local_dir: str):
     files: list[str] = []
 
     for path in Path(local_dir).rglob("*"):
-        if not path.is_file():
+        if path.is_file() is False:
             continue
         files.append(f"{path}".replace("../", "", 1))
 
@@ -224,8 +226,8 @@ def main():
     # get semantic version number -------------------------------------------------------------------- #
     version_current = changelog.updates[0].version
 
-    # get timestamp of most recent update ------------------------------------------------------------ #
-    timestamp_current = changelog.updates[0].timestamp
+    # get tiemstamp of last update ------------------------------------------------------------------- #
+    last_timestamp = changelog.updates[0].timestamp
 
     # ask for new semantic version ------------------------------------------------------------------- #
     while True:
@@ -304,7 +306,7 @@ def main():
                 )
 
     # collate list of mods --------------------------------------------------------------------------- #
-    if not dry_run:
+    if dry_run is False:
         try:
             sftp.mkdir("mods")
         except Exception:
@@ -332,16 +334,16 @@ def main():
 
     print("Finding local config files...")
     configs_local = local_list_recursive("../config")
+    configs_final = []
     print(f"Found {len(configs_local)} configs.")
 
-    if not config_all:
+    if config_all is False:
         for config in configs_local:
             modified = os.path.getmtime("../" + config)
             t1 = datetime.fromtimestamp(modified)
-            t2 = datetime.fromtimestamp(timestamp_current)
-            latest = max((t1, t2))
+            t2 = datetime.fromtimestamp(last_timestamp)
 
-            if latest == t2:
+            if t1 <= t2:
                 configs_local.remove(config)
 
     print(os.linesep)
@@ -359,17 +361,18 @@ def main():
         if mod not in mods_remote:
             upload_queue.append(mod)
 
-    for config in tqdm(configs_local, "Configs", leave=True, position=0):
+    for config in tqdm(configs_final, "Configs", leave=True, position=0):
         upload_queue.append(config)
 
-    files_local = mods_local + configs_local
+    files_local = mods_local + configs_final
+    print(f"{len(upload_queue)} files need uploading.")
 
     print(os.linesep)
 
     # upload files from queue ------------------------------------------------------------------------ #
     print("Uploading files to server...")
     for file in tqdm(upload_queue, "Progress", leave=True, position=0):
-        if not dry_run:
+        if dry_run is False:
             try:
                 sftp.put("../" + file, file)
             except FileNotFoundError:
@@ -399,7 +402,7 @@ def main():
         sftp.put("changelog.toml", "changelog.toml")
 
     # clean up and end script ------------------------------------------------------------------------ #
-    if not dry_run:
+    if dry_run is False:
         os.remove("changelog.toml")
 
     sftp.close()
