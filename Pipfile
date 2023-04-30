@@ -10,6 +10,7 @@ tcping = "*"
 toml = "*"
 paramiko = "*"
 semver = "*"
+tqdm = "*"
 
 [dev-packages]
 

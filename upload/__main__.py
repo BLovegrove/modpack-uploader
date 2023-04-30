@@ -12,6 +12,7 @@ from tkinter import messagebox
 from enum import Enum
 import config as cfg
 from stat import S_ISDIR, S_ISREG
+from tqdm import tqdm
 
 
 # ================================================================================================ #
@@ -303,13 +304,17 @@ def main():
                 )
 
     # collate list of mods --------------------------------------------------------------------------- #
-    try:
-        sftp.mkdir("mods")
-    except Exception:
-        pass
+    if not dry_run:
+        try:
+            sftp.mkdir("mods")
+        except Exception:
+            pass
 
     print("Finding remote mods...")
-    mods_remote = sftp_list_recursive(sftp, "mods")
+    if dry_run:
+        mods_remote = []
+    else:
+        mods_remote = sftp_list_recursive(sftp, "mods")
     print(f"Found {len(mods_remote)} mods." + os.linesep)
 
     print("Finding local mods...")
@@ -319,10 +324,11 @@ def main():
     print(os.linesep)
 
     # collate list of configs (all, or only updates, depending on config_all) ------------------------ #
-    try:
-        sftp.mkdir("config")
-    except Exception:
-        pass
+    if not dry_run:
+        try:
+            sftp.mkdir("config")
+        except Exception:
+            pass
 
     print("Finding local config files...")
     configs_local = local_list_recursive("../config")
@@ -344,17 +350,18 @@ def main():
     upload_queue = []
 
     print("Collating list of files to upload...")
-    for mod in mods_local:
-        print(
-            f"#{mods_local.index(mod) + 1} of {len(mods_local + configs_local)} - '{mod}' "
+    for mod in (
+        pbar := tqdm(
+            mods_local,
+            "Mods",
+            leave=True,
+            position=0,
         )
+    ):
         if mod not in mods_remote:
             upload_queue.append(mod)
 
-    for config in configs_local:
-        print(
-            f"#{len(mods_local) + configs_local.index(config) + 1} of {len(mods_local + configs_local)} - '{config}'"
-        )
+    for config in (pbar := tqdm(configs_local, "Configs", leave=True, position=0)):
         upload_queue.append(config)
 
     files_local = mods_local + configs_local
@@ -363,10 +370,7 @@ def main():
 
     # upload files from queue ------------------------------------------------------------------------ #
     print("Uploading files to server...")
-    for file in upload_queue:
-        print(
-            f"#{upload_queue.index(file) + 1} of {len(upload_queue)} - '{'../' + file}'"
-        )
+    for file in (pbar := tqdm(upload_queue, "Progress", leave=True, position=0)):
         if not dry_run:
             try:
                 sftp.put("../" + file, file)
