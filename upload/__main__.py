@@ -350,18 +350,16 @@ def main():
     upload_queue = []
 
     print("Collating list of files to upload...")
-    for mod in (
-        pbar := tqdm(
-            mods_local,
-            "Mods",
-            leave=True,
-            position=0,
-        )
+    for mod in tqdm(
+        mods_local,
+        "Mods",
+        leave=True,
+        position=0,
     ):
         if mod not in mods_remote:
             upload_queue.append(mod)
 
-    for config in (pbar := tqdm(configs_local, "Configs", leave=True, position=0)):
+    for config in tqdm(configs_local, "Configs", leave=True, position=0):
         upload_queue.append(config)
 
     files_local = mods_local + configs_local
@@ -370,7 +368,7 @@ def main():
 
     # upload files from queue ------------------------------------------------------------------------ #
     print("Uploading files to server...")
-    for file in (pbar := tqdm(upload_queue, "Progress", leave=True, position=0)):
+    for file in tqdm(upload_queue, "Progress", leave=True, position=0):
         if not dry_run:
             try:
                 sftp.put("../" + file, file)
