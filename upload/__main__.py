@@ -1,5 +1,7 @@
 import copy
 from datetime import datetime
+import hashlib
+import pathlib
 import socket
 import paramiko
 from paramiko import SFTPClient
@@ -12,9 +14,7 @@ from tkinter import messagebox
 from enum import Enum
 import config as cfg
 from stat import S_ISDIR, S_ISREG
-
-
-# TODO: rewrite all of this to abstract changes away from mods/config and just read the start of the change entry to determine what goes where
+from tqdm import tqdm
 
 
 # ================================================================================================ #
@@ -25,7 +25,7 @@ class ChangeType(Enum):
     CFG = 2
 
 
-class Change:
+class Changes:
     def __init__(self, add: list[str] = None, rem: list[str] = None):
         self.add = add if add else []
         self.rem = rem if rem else []
@@ -47,27 +47,23 @@ class Update:
         self,
         version: Version,
         timestamp: float,
-        mods: Change,
-        cfgs: Change,
+        changes: Changes,
     ):
         self.version = version
         self.timestamp = timestamp
-        self.mods = mods
-        self.cfgs = cfgs
+        self.changes = changes
 
     def to_dict(self):
-        mods = {"add": self.mods.add, "rem": self.mods.rem}
-        cfgs = {"add": self.cfgs.add, "rem": self.cfgs.rem}
+        changes = {"add": self.changes.add, "rem": self.changes.rem}
         return {
             "version": f"{self.version.major}.{self.version.minor}.{self.version.patch}",
             "timestamp": self.timestamp,
-            "mods": mods,
-            "cfgs": cfgs,
+            "changes": changes,
         }
 
 
 class Changelog:
-    def __init__(self, updates: Update = None):
+    def __init__(self, updates: list[Update] = None):
         self.updates: list[Update] = updates if updates else []
 
     def from_dict(self, config: dict[str, any]):
@@ -78,25 +74,20 @@ class Changelog:
                 Update(
                     Version.parse(update["version"]),
                     update["timestamp"],
-                    Change(update["mods"]["add"], update["mods"]["rem"]),
-                    Change(update["cfgs"]["add"], update["cfgs"]["rem"]),
+                    Changes(update["changes"]["add"], update["changes"]["rem"]),
                 )
             )
 
         self.updates = updates
         return self
 
-    def compile_changes(self, target: ChangeType):
+    def compile_changes(self):
         result: list[str] = []
 
         for update in self.updates:
-            for item in (
-                update.mods.add if target == ChangeType.MOD else update.cfgs.add
-            ):
+            for item in update.changes.add:
                 result.append(item)
-            for item in (
-                update.mods.rem if target == ChangeType.MOD else update.cfgs.rem
-            ):
+            for item in update.changes.rem:
                 try:
                     result.remove(item)
                 except ValueError:
@@ -104,15 +95,13 @@ class Changelog:
 
         return result
 
-    def add_update(self, version: str, new_mods: list[str], new_cfgs: list[str]):
-        active_mods = self.compile_changes(ChangeType.MOD)
-        active_cfgs = self.compile_changes(ChangeType.CFG)
+    def add_update(self, version: Version, new_files: list[str]):
+        active_files = self.compile_changes()
 
         update = Update(
             version=version,
             timestamp=datetime.timestamp(datetime.now()),
-            mods=Change().from_comparison(active_mods, new_mods),
-            cfgs=Change().from_comparison(active_cfgs, new_cfgs),
+            changes=Changes().from_comparison(active_files, new_files),
         )
 
         self.updates.insert(0, update)
@@ -130,16 +119,19 @@ class Changelog:
 # ================================================================================================ #
 # helper methods                                                                                   #
 # ================================================================================================ #
-def sftp_list_recursive(sftp: SFTPClient, remote_dir: str):
+def sftp_list_recursive(sftp: SFTPClient, remote_dir: str, file_list: list[str] = None):
     files: list[str] = []
 
     for dir in sftp.listdir_attr(remote_dir):
         path = remote_dir + "/" + dir.filename
         mode = dir.st_mode
         if S_ISDIR(mode):
-            sftp_list_recursive(sftp, path)
+            sftp_list_recursive(sftp, path, files)
         elif S_ISREG(mode):
-            files.append(path)
+            if file_list:
+                file_list.append(path)
+            else:
+                files.append(path)
 
     return files
 
@@ -148,7 +140,7 @@ def local_list_recursive(local_dir: str):
     files: list[str] = []
 
     for path in Path(local_dir).rglob("*"):
-        if not path.is_file():
+        if path.is_file() is False:
             continue
         files.append(f"{path}".replace("../", "", 1))
 
@@ -170,7 +162,6 @@ def sftp_mkdirs(sftp: SFTPClient, remote: str):
         try:
             sftp.stat(dir)
         except:
-            print(f"making {dir} dir"),
             sftp.mkdir(dir)
 
 
@@ -186,7 +177,7 @@ def main():
         dry_run = False
 
     # set current working dir to script dir ---------------------------------------------------------- #
-    os.chdir(os.path.dirname(__file__))
+    os.chdir(os.path.dirname(sys.argv[0]))
 
     # check connection to server --------------------------------------------------------------------- #
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -222,37 +213,44 @@ def main():
     sftp = ssh.open_sftp()
     sftp.chdir(cfg.server.filepath)
 
-    # load changelog file ---------------------------------------------------------------------------- #
-    with sftp.open("changelog.toml", "r") as f:
-        dict_changelog = toml.loads("".join(f.readlines()))
-        changelog = Changelog().from_dict(dict_changelog)
+    # load changelog file or create new if one doesnt exist ------------------------------------------ #
+    try:
+        with sftp.open("changelog.toml", "r") as f:
+            dict_changelog = toml.loads("".join(f.readlines()))
+            changelog = Changelog().from_dict(dict_changelog)
+
+    except FileNotFoundError:
+        changelog = Changelog()
+        changelog.add_update(Version(0, 0, 0), [])
 
     # get semantic version number -------------------------------------------------------------------- #
     version_current = changelog.updates[0].version
 
-    # get timestamp of most recent update ------------------------------------------------------------ #
-    timestamp_current = changelog.updates[0].timestamp
+    # get tiemstamp of last update ------------------------------------------------------------------- #
+    last_timestamp = changelog.updates[0].timestamp
 
     # ask for new semantic version ------------------------------------------------------------------- #
     while True:
-        config_all = input(
+        version_target = input(
             os.linesep
+            + f"Current version: {version_current}"
+            + os.linesep
             + "Please enter a semantic version type to increase by 1 for this upload. (M)ajor, (m)inor (p)atch or a custom number with (c)ustom."
             + os.linesep
             + "> "
         )
 
-        if config_all in ["M", "m", "p", "c"]:
+        if version_target in ["M", "m", "p", "c"]:
             break
-        elif config_all.lower() in ["major", "minor", "patch", "custom"]:
-            config_all = config_all.lower()
+        elif version_target.lower() in ["major", "minor", "patch", "custom"]:
+            version_target = version_target.lower()
             break
         else:
             print(
                 f"{os.linesep}Please enter a valid option (full words or short-codes minus backets. Short-codes are case-sensitive).{os.linesep}"
             )
 
-    match config_all:
+    match version_target:
         case "M" | "major":
             version_update = version_current.bump_major()
 
@@ -271,8 +269,8 @@ def main():
                 )
 
                 try:
-                    v = Version.parse(version_custom)
-                    version_update = version_custom
+                    parsed_version = Version.parse(version_custom)
+                    version_update = parsed_version
                     break
                 except ValueError as e:
                     print(
@@ -280,75 +278,118 @@ def main():
                         + os.linesep
                     )
 
-    # find out if user wants *all* configs, or only ones changed since last update ------------------- #
-    while True:
-        config_all = input(
-            os.linesep
-            + "Would you like to upload *all* config files? Please enter (Y)es for all, or (N)o for updated only."
-            + os.linesep
-            + "> "
-        )
+    print(os.linesep)
 
-        if config_all.lower() in ["y", "n"]:
-            config_all = config_all.lower()
-            break
-        elif config_all.lower() in ["yes", "no"]:
-            config_all = config_all.lower()
-            break
-        else:
-            print(
+    # find out if user wants *all* configs, or only ones changed since last update ------------------- #
+    if version_current == Version(0, 0, 0):
+        config_all = True
+    else:
+        while True:
+            config_all = input(
                 os.linesep
-                + f"Please enter a valid option (full words or short-codes minus backets)."
+                + "Would you like to upload *all* config files? Please enter (Y)es for all, or (N)o for updated only."
                 + os.linesep
+                + "> "
             )
 
+            if config_all.lower() in ["y", "n", "yes", "no"]:
+                if config_all.lower() == "y" or config_all.lower() == "yes":
+                    config_all = True
+                else:
+                    config_all = False
+                break
+            else:
+                print(
+                    os.linesep
+                    + f"Please enter a valid option (full words or short-codes minus backets)."
+                    + os.linesep
+                )
+
     # collate list of mods --------------------------------------------------------------------------- #
-    mods_remote = sftp_list_recursive(sftp, "mods")
+    if dry_run is False:
+        try:
+            sftp.mkdir("mods")
+        except Exception:
+            pass
+
+    print("Finding remote mods...")
+    if dry_run:
+        mods_remote = []
+    else:
+        mods_remote = sftp_list_recursive(sftp, "mods")
+    print(f"Found {len(mods_remote)} mods." + os.linesep)
+
+    print("Finding local mods...")
     mods_local = local_list_recursive("../mods")
+    print(f"Found {len(mods_local)} mods.")
+
+    print(os.linesep)
 
     # collate list of configs (all, or only updates, depending on config_all) ------------------------ #
+    if not dry_run:
+        try:
+            sftp.mkdir("config")
+        except Exception:
+            pass
+
+    print("Finding local config files...")
     configs_local = local_list_recursive("../config")
+    configs_final = []
+    print(f"Found {len(configs_local)} configs.")
 
-    if not config_all:
+    if config_all is False:
         for config in configs_local:
-            modified = os.path.getmtime("../config/" + config)
+            modified = os.path.getmtime("../" + config)
             t1 = datetime.fromtimestamp(modified)
-            t2 = datetime.fromtimestamp(timestamp_current)
-            latest = max((t1, t2))
+            t2 = datetime.fromtimestamp(last_timestamp)
 
-            if latest == t2:
+            if t1 <= t2:
                 configs_local.remove(config)
 
-    # compile into upload queue ---------------------------------------------------------------------- #
+    print(os.linesep)
 
+    # compile into upload queue ---------------------------------------------------------------------- #
     upload_queue = []
 
-    for mod in mods_local:
+    print("Collating list of files to upload...")
+    for mod in tqdm(
+        mods_local,
+        "Mods",
+        leave=True,
+        position=0,
+    ):
         if mod not in mods_remote:
             upload_queue.append(mod)
 
-    for config in configs_local:
+    for config in tqdm(configs_final, "Configs", leave=True, position=0):
         upload_queue.append(config)
 
-    print(f"Upload queue:{upload_queue}")
+    files_local = mods_local + configs_final
+    print(f"{len(upload_queue)} files need uploading.")
+
+    print(os.linesep)
 
     # upload files from queue ------------------------------------------------------------------------ #
-    if dry_run:
-        for file in upload_queue:
-            print(f"Uploading {'../' + file} to {file}")
-    else:
-        for file in upload_queue:
+    print("Uploading files to server...")
+    for file in tqdm(upload_queue, "Progress", leave=True, position=0):
+        if dry_run is False:
             try:
                 sftp.put("../" + file, file)
             except FileNotFoundError:
                 sftp_mkdirs(sftp, file)
                 sftp.put("../" + file, file)
 
+    print(os.linesep)
+
     # add new update to changelog -------------------------------------------------------------------- #
+    print("Adding update to changelog...")
     changelog_old = copy.deepcopy(changelog)
-    changelog.add_update(version_update, mods_local, configs_local)
+    changelog.add_update(version_update, files_local)
+
+    print(os.linesep)
 
     # dump changelog and override remote ------------------------------------------------------------- #
+    print("Dumping new changelog and uploading to server...")
     if dry_run:
         with open("dryrun_old.toml", "w") as f:
             f.write(toml.dumps(changelog_old.to_dict()))
@@ -361,7 +402,7 @@ def main():
         sftp.put("changelog.toml", "changelog.toml")
 
     # clean up and end script ------------------------------------------------------------------------ #
-    if not dry_run:
+    if dry_run is False:
         os.remove("changelog.toml")
 
     sftp.close()
