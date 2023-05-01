@@ -150,7 +150,10 @@ def local_list_recursive(local_dir: str):
     for path in Path(local_dir).rglob("*"):
         if path.is_file() is False:
             continue
-        files.append(f"{path}".replace("../", "", 1))
+        if os.name == "nt":
+            files.append(f"{path}".replace("..\\", "", 1).replace("\\", "/"))
+        else:
+            files.append(f"{path}".replace("../", "", 1))
 
     return files
 
