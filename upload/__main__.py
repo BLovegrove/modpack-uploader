@@ -1,7 +1,5 @@
 import copy
 from datetime import datetime
-import hashlib
-import pathlib
 import socket
 import paramiko
 from paramiko import SFTPClient
@@ -29,20 +27,6 @@ class Changes:
     def __init__(self, add: list[str] = None, rem: list[str] = None):
         self.add = add if add else []
         self.rem = rem if rem else []
-
-        # def from_comparison(self, remote_state: list[str], local_state: list[str]):
-        #     for item in local_state:
-        #         if item not in remote_state:
-        #             self.add.append(item)
-
-        #     for item in remote_state:
-        #         if item not in local_state:
-        #             self.rem.append(item)
-
-        # print(f"Remote: {remote_state}")
-        # print(f"Local: {local_state}")
-
-        # return self
 
 
 class Update:
