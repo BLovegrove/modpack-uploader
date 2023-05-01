@@ -33,18 +33,15 @@ class Update:
     def __init__(
         self,
         version: Version,
-        timestamp: float,
         changes: Changes,
     ):
         self.version = version
-        self.timestamp = timestamp
         self.changes = changes
 
     def to_dict(self):
         changes = {"add": self.changes.add, "rem": self.changes.rem}
         return {
             "version": f"{self.version.major}.{self.version.minor}.{self.version.patch}",
-            "timestamp": self.timestamp,
             "changes": changes,
         }
 
@@ -60,7 +57,6 @@ class Changelog:
             updates.append(
                 Update(
                     Version.parse(update["version"]),
-                    update["timestamp"],
                     Changes(update["changes"]["add"], update["changes"]["rem"]),
                 )
             )
@@ -92,7 +88,6 @@ class Changelog:
 
         update = Update(
             version=version,
-            timestamp=datetime.timestamp(datetime.now()),
             changes=Changes(files_added, files_removed),
         )
 
@@ -221,9 +216,6 @@ def main():
     # get semantic version number -------------------------------------------------------------------- #
     version_current = changelog.updates[0].version
 
-    # get tiemstamp of last update ------------------------------------------------------------------- #
-    last_timestamp = changelog.updates[0].timestamp
-
     # ask for new semantic version ------------------------------------------------------------------- #
     while True:
         version_target = input(
@@ -275,31 +267,6 @@ def main():
 
     print(os.linesep)
 
-    # find out if user wants *all* configs, or only ones changed since last update ------------------- #
-    if version_current == Version(0, 0, 0):
-        config_all = True
-    else:
-        while True:
-            config_all = input(
-                os.linesep
-                + "Would you like to upload *all* config files? Please enter (Y)es for all, or (N)o for updated only."
-                + os.linesep
-                + "> "
-            )
-
-            if config_all.lower() in ["y", "n", "yes", "no"]:
-                if config_all.lower() == "y" or config_all.lower() == "yes":
-                    config_all = True
-                else:
-                    config_all = False
-                break
-            else:
-                print(
-                    os.linesep
-                    + f"Please enter a valid option (full words or short-codes minus backets)."
-                    + os.linesep
-                )
-
     # collate list of mods --------------------------------------------------------------------------- #
     if dry_run is False:
         try:
@@ -322,33 +289,6 @@ def main():
 
     print(os.linesep)
 
-    # collate list of configs (all, or only updates, depending on config_all) ------------------------ #
-    if not dry_run:
-        try:
-            sftp.mkdir("config")
-        except Exception:
-            pass
-
-    print("Finding local config files...")
-    configs_local = local_list_recursive("../config")
-
-    if not config_all:
-        configs_changed = []
-
-        for config in configs_local:
-            modified = os.path.getmtime("../" + config)
-            t1 = datetime.fromtimestamp(modified)
-            t2 = datetime.fromtimestamp(last_timestamp)
-
-            if t1 > t2:
-                configs_changed.append(config)
-    else:
-        configs_changed = configs_local
-
-    print(f"Found {len(configs_changed)} configs that need uploading.")
-
-    print(os.linesep)
-
     # compile into upload queue ---------------------------------------------------------------------- #
     upload_queue = []
 
@@ -361,11 +301,6 @@ def main():
     ):
         upload_queue.append(mod)
 
-    for config in tqdm(configs_changed, "Configs", leave=True, position=0):
-        upload_queue.append(config)
-
-    files_local = mods_local + configs_local
-    files_changed = mods_changed + configs_changed
     print(f"{len(upload_queue)} files need uploading.")
 
     print(os.linesep)
@@ -385,7 +320,7 @@ def main():
     # add new update to changelog -------------------------------------------------------------------- #
     print("Adding update to changelog...")
     changelog_old = copy.deepcopy(changelog)
-    changelog.add_update(version_update, files_local, files_changed)
+    changelog.add_update(version_update, mods_local, mods_changed)
 
     print(os.linesep)
 
