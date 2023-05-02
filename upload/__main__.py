@@ -295,13 +295,11 @@ def main():
     print("Collating list of files to upload...")
     for mod in tqdm(
         mods_changed,
-        "Mods",
+        "Progress",
         leave=True,
         position=0,
     ):
         upload_queue.append(mod)
-
-    print(f"{len(upload_queue)} files need uploading.")
 
     print(os.linesep)
 
